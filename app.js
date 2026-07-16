@@ -272,13 +272,20 @@ async function startAsCallee(requestId, peerUid, peerHandle) {
   };
   pc.onconnectionstatechange = () => updateConnState(state, pc.connectionState);
 
-  const reqSnap = await getDoc(doc(db, "requests", requestId));
-  const offer = reqSnap.data().offer;
-  await pc.setRemoteDescription(new RTCSessionDescription(offer));
-  const answerDescription = await pc.createAnswer();
-  await pc.setLocalDescription(answerDescription);
-  await updateDoc(doc(db, "requests", requestId), {
-    answer: { type: answerDescription.type, sdp: answerDescription.sdp },
+  // FIX: Listen for the offer to be created by the caller instead of guessing when it's ready
+  const unsub = onSnapshot(doc(db, "requests", requestId), async (snap) => {
+    const data = snap.data();
+    if (data?.offer && !pc.currentRemoteDescription) {
+      // We got the offer! Stop listening to this document's updates
+      unsub(); 
+      
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      const answerDescription = await pc.createAnswer();
+      await pc.setLocalDescription(answerDescription);
+      await updateDoc(doc(db, "requests", requestId), {
+        answer: { type: answerDescription.type, sdp: answerDescription.sdp },
+      });
+    }
   });
 
   onSnapshot(offerCandidates, (snap) => {
